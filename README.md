@@ -1,12 +1,17 @@
 ![Isaac Sim](docs/readme/hero_shot_compressed.png)
 
 ---
-# Isaac Sim
+# Isaac Sim – Custom Build with Extended Examples
+
+> This repository is a customized version of NVIDIA Isaac Sim tailored for advanced robotics research and development.  
+> In addition to the official Isaac Sim capabilities, this repo includes **original example projects**, **custom simulation scripts**, and **experimental features** developed for specific workflows (e.g., deformable object benchmarks and ROS2-based manipulation tasks).  
+> These examples are maintained independently from the official Isaac Sim release and may introduce dependencies, APIs, or behaviors that differ from the upstream version.
 
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://docs.python.org/3/whatsnew/3.11.html)
 [![Linux platform](https://img.shields.io/badge/platform-linux--64-orange.svg)](https://releases.ubuntu.com/22.04/)
 [![Windows platform](https://img.shields.io/badge/platform-windows--64-orange.svg)](https://www.microsoft.com/en-us/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-yellow.svg)](https://opensource.org/license/apache-2-0)
+
 
 NVIDIA Isaac Sim™ is a simulation platform built on NVIDIA Omniverse, designed to develop, test, train, and deploy AI-powered robots in realistic virtual environments. It supports importing robotic systems from common formats such as URDF, MJCF, and CAD. The simulator leverages high-fidelity, GPU-accelerated physics engines to simulate accurate dynamics and support multi-sensor RTX rendering at scale. It comes equipped with end-to-end workflows including synthetic data generation, reinforcement learning, ROS integration, and digital twin simulation. Isaac Sim provides the infrastructure needed to support robotics development at any stage.
 
