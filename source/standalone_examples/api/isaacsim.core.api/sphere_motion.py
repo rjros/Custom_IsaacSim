@@ -1,124 +1,152 @@
 # SPDX-License-Identifier: Apache-2.0
 
-
 from isaacsim import SimulationApp
 simulation_app = SimulationApp({"headless": False})
 
-from isaacsim.core.api import World
-from isaacsim.core.api.objects import DynamicCuboid,VisualCuboid,FixedCuboid
 import numpy as np
+import matplotlib.pyplot as plt
+
+from isaacsim.core.api import World
+from isaacsim.core.api.objects import DynamicCuboid, FixedCuboid
+from isaacsim.core.prims import RigidPrim
+from pxr import UsdGeom, UsdPhysics
+
+simulation_app.update_app_window()
+simulation_app.set_setting("/app/asyncRendering", True)
+simulation_app.set_setting("/physics/autoStart", False)   # ⛔ do NOT start physics automatically
+simulation_app.set_setting("/app/runSim", False)          # ensure simulation is paused at launch
 
 
-from pxr import Usd, UsdGeom, UsdPhysics, PhysxSchema, PhysicsSchemaTools, Gf, Sdf, Tf
-import omni.usd
 
-class SphereMotion():
+class CompressionTestRigid:
     def __init__(self):
-        self.my_world= World(stage_units_in_meters=1.0)
-        self.stage=simulation_app.context.get_stage()
-        self.my_world.scene.add_default_ground_plane()
-        self.xform = UsdGeom.Xform.Define(self.stage, "/World/Xform")
-        self._create_dynamic_cube()
-        self._create_dynamic_cube_2()
+        self.world = World(stage_units_in_meters=1.0)
+        self.stage = self.world.stage
+        self.world.scene.add_default_ground_plane()
 
-        # self._create_visual_cube()
+        self._create_fixed_block()
+        self._create_dynamic_block()
         self._create_prismatic_joint()
-        # self.cube_2.set_rigid_body_enabled(False)     # freezes dynamics
+        self._create_rigid_view()
 
-        # self.rb = PhysxSchema.PhysxRigidBodyAPI.Apply(["/new_cube_1"])
-        # self.rb.CreateSolverPositionIterationCountAttr().Set(64)
-        # self.rb.CreateSolverVelocityIterationCountAttr().Set(8)
+        self.force_log = []
+        self.disp_log = []
+        self.world.reset()
 
+        print("Rigid compression test initialized.")
 
-    # def _create_visual_cube(self):
-    #     print("Create visual cube")
-    #     self.cube_1 = self.my_world.scene.add(
-    #     VisualCuboid(
-    #         prim_path="/new_cube_1",
-    #         name="visual_cube",
-    #         position=np.array([0, 0, 0.5]),
-    #         size=0.3,
-    #         color=np.array([255, 255, 255]),
-    #     )
-    # )
+    # ------------------------------------------------------------------
+    def _create_fixed_block(self):
+        """Bottom rigid block, reference surface"""
+        self.block = self.world.scene.add(
+            FixedCuboid(
+                prim_path="/FixedBlock",
+                name="fixed_block",
+                position=np.array([0, 0, 0.25]),  # height = 0.5 → center at 0.25
+                size=0.5,
+                color=np.array([255, 0, 0]),
+            )
+        )
 
-    def _create_dynamic_cube(self):
-        print("Creating dynamic cube")
-        # Create dynamic body
-        self.cube_1= self.my_world.scene.add(
+    # ------------------------------------------------------------------
+    def _create_dynamic_block(self):
+        """Top cube to compress the block"""
+        self.top = self.world.scene.add(
             DynamicCuboid(
-                prim_path="/new_cube_1",
-                name="cube_1",
+                prim_path="/DynamicTop",
+                name="dynamic_top",
                 position=np.array([0, 0, 1.0]),
-                scale=np.array([0.6, 0.5, 0.2]),
+                scale=np.array([0.6, 0.6, 0.3]),
                 size=1.0,
                 color=np.array([255, 255, 0]),
             )
         )
 
-    def _create_dynamic_cube_2(self):
-        print("Creating dynamic cube")
-        # Create dynamic body
-        self.cube_2= self.my_world.scene.add(
-            FixedCuboid(
-                prim_path="/new_cube_2",
-                name="cube_2",
-                position=np.array([0, 0, 0.5]),
-                scale=np.array([0.5, 0.5, 0.5]),
-                size=1,
-                color=np.array([255, 0, 0]),
-            )
-        )
-    
+    # ------------------------------------------------------------------
     def _create_prismatic_joint(self):
-        self.prismatic_joint_1 = UsdPhysics.PrismaticJoint.Define(self.stage,"/World/Joint_Z")
-        self.prismatic_joint_1.CreateAxisAttr("Z")
-        self.prismatic_joint_1.CreateLowerLimitAttr(0.0)
-        self.prismatic_joint_1.CreateUpperLimitAttr(1.0)
-        self.prismatic_joint_1.CreateBody0Rel().SetTargets([str(self.xform.GetPath())])
-        self.prismatic_joint_1.CreateBody1Rel().SetTargets(["/new_cube_1"])
-        self.drive = UsdPhysics.DriveAPI.Apply(self.prismatic_joint_1.GetPrim(), "linear")
-        self.drive.CreateDampingAttr(10000)
-        self.drive.CreateStiffnessAttr(10000)
-        # px_joint = PhysxSchema.PhysxJointAPI.Get(stage, str(joint.GetPath()))
-        # px_joint.CreateMaxJointVelocityAttr().Set(5.0)
+        """Joint that moves DynamicTop along Z"""
+        joint = UsdPhysics.PrismaticJoint.Define(self.stage, "/World/JointZ")
+        joint.CreateAxisAttr("Z")
+        joint.CreateLowerLimitAttr(0.0)
+        joint.CreateUpperLimitAttr(1.2)
 
+        # Static reference
+        xform = UsdGeom.Xform.Define(self.stage, "/World/Ref")
+        joint.CreateBody0Rel().SetTargets(["/World/Ref"])
 
-    ## Simulation Loop ##
+        # Body under displacement control
+        joint.CreateBody1Rel().SetTargets(["/DynamicTop"])
+
+        self.drive = UsdPhysics.DriveAPI.Apply(joint.GetPrim(), "linear")
+        self.drive.CreateTypeAttr().Set("position")
+        self.drive.CreateStiffnessAttr().Set(40000)
+        self.drive.CreateDampingAttr().Set(2000)
+
+    # ------------------------------------------------------------------
+    def _create_rigid_view(self):
+        """Attach a view to capture contact forces"""
+        self.contact_view = RigidPrim(
+            prim_paths_expr="/DynamicTop",                   # object of interest
+            contact_filter_prim_paths_expr=["/FixedBlock"],  # MUST specify!
+            name="contact_view",
+            max_contact_count=32,
+        )
+        self.world.scene.add(self.contact_view)
+
+    # ------------------------------------------------------------------
     def play(self):
-        # Attach a drive to the joint
-        # drive = UsdPhysics.DriveAPI.Apply(
-        #     self.prismatic_joint_1.GetPrim(), Tf.Token("linear")
-        # )
-        # drive.CreateDriveTypeAttr().Set("position")   # position-controlled drive
-        # drive.CreateStiffnessAttr().Set(50000.0)      # how strong it holds the target
-        # drive.CreateDampingAttr().Set(2000.0)         # damping to avoid oscillation
-
-        target = 0.0          # relative Z displacement
-        going_up = False      # motion direction
+        """Main loop — compress, record, plot"""
+        target = 1.0
+        direction = -1
 
         while simulation_app.is_running():
+            if self.world.is_playing():
 
-            if self.my_world.is_playing():
+                target += 0.001 * direction
 
-                # Move between 0.0 and 1.0 meters
-                if going_up:
-                    target += 0.001   # upward movement
-                    if target >= 1.0:
-                        going_up = False
-                else:
-                    target -= 0.001   # downward movement
-                    if target <= 0.0:
-                        going_up = True
+                if target <= 0.35:  # start contact and compress
+                    direction = +1
+                elif target >= 1.0:
+                    direction = -1
 
-                # Command displacement
                 self.drive.GetTargetPositionAttr().Set(target)
 
-            self.my_world.step(render=True)
+                # --- force extraction ---
+                result = self.contact_view.get_contact_force_data(dt=1/60)
+                if result is not None:
+                    forces, points, normals, distances, counts, starts = result
+                    if forces.shape[0] > 0:
+                        # Project impulse along normals for normal force
+                        normal_force = np.sum(np.sum(forces * normals, axis=1))
+                    else:
+                        normal_force = 0
+                else:
+                    normal_force = 0
 
+                self.force_log.append(normal_force)
+                self.disp_log.append(target)
+
+            self.world.step(render=True)
+
+        self._plot()
+        simulation_app.
         simulation_app.close()
 
+    # ------------------------------------------------------------------
+    def _plot(self):
+        """Plot after simulation window closes"""
+        disp = np.array(self.disp_log)
+        force = np.array(self.force_log)
+
+        plt.figure(figsize=(7, 4))
+        plt.plot(disp, force, linewidth=2)
+        plt.xlabel("Displacement (m)")
+        plt.ylabel("Contact Force (N)")
+        plt.title("Rigid Compression Test — Force vs Displacement")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig("force_displacement2.png", dpi=300)
+        print("Plot saved to force_displacement.png")
+
 if __name__ == "__main__":
-    SphereMotion().play()
-
-
+        CompressionTestRigid().play()
