@@ -24,6 +24,8 @@ class CompressionTestRigid:
         self.stage = self.world.stage
         self.world.scene.add_default_ground_plane()
 
+        self.world.scene.reset()
+
         self._create_fixed_block()
         self._create_dynamic_block()
         self._create_prismatic_joint()
