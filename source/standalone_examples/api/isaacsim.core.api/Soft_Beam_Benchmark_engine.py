@@ -47,10 +47,10 @@ parser.add_argument("--beam_width", type=float, default=0.03,
                     help="Beam width in meters")
 parser.add_argument("--beam_height", type=float, default=0.03, 
                     help="Beam height in meters")
-parser.add_argument("--resolution", type=int, default=0.01, 
+parser.add_argument("--resolution", type=int, default=30, 
                     help="Simulation mesh resolution (elements along longest dimension). "
                          "Recommended: 20=fast, 30=balanced, 40=accurate")
-parser.add_argument("--solver_iterations", type=int, default=50,
+parser.add_argument("--solver_iterations", type=int, default=130,
                     help="Position solver iterations per timestep. "
                          "Recommended: 30=fast, 40=balanced, 50=accurate")
 parser.add_argument("--max_time", type=float, default=1.5, 
@@ -221,7 +221,7 @@ class DragonSkinCantileverValidation:
             deformable_material=self.deformable_material,
             vertex_velocity_damping=0.0,
             sleep_damping=0.0,
-            sleep_threshold=0.0,
+            sleep_threshold=0.001,
             settling_threshold=0.0,
             self_collision=False,
             solver_position_iteration_count=args.solver_iterations,
