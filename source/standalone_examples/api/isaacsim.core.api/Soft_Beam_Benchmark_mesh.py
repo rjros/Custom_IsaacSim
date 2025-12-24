@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Cantilever Beam Validation Test - Dragon Skin 10
+Cantilever Beam Validation Test - Dragon Skin 10 (WITH VISUAL MARKERS)
 Based on: "Sim-to-Real for Soft Robots using Differentiable FEM"
 Material: Smooth-On Dragon Skin 10 (Shore Hardness 10A)
 Time window: 0 to 1.5 seconds
+
+ENHANCEMENT: Added colored sphere markers at tracked nodes
 """
 
 from isaacsim import SimulationApp
@@ -18,21 +20,51 @@ simulation_app = SimulationApp({
 import argparse
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
+
+# Check for matplotlib availability
+try:
+    import matplotlib
+    matplotlib.use('Agg')  # Use non-interactive backend
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+    print("Warning: matplotlib not available. Plots will not be generated.")
+    print("Data will still be saved to CSV files.")
+
 from isaacsim.core.api import World
 from isaacsim.core.api.materials.deformable_material import DeformableMaterial
 from isaacsim.core.prims import DeformablePrim, SingleDeformablePrim
 from omni.physx.scripts import physicsUtils
 from pxr import Gf, UsdGeom, PhysxSchema, UsdPhysics, Sdf, UsdShade, UsdLux
 import isaacsim.core.utils.deformable_mesh_utils as deformableMeshUtils
+from isaacsim.core.utils.prims import create_prim
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--beam_length", type=float, default=0.10, help="Beam length in meters")
-parser.add_argument("--beam_width", type=float, default=0.03, help="Beam width in meters")
-parser.add_argument("--beam_height", type=float, default=0.03, help="Beam height in meters")
-parser.add_argument("--resolution", type=int, default=20, help="Simulation mesh resolution")
-parser.add_argument("--max_time", type=float, default=1.5, help="Simulation time in seconds")
+# # Set random seeds for reproducibility
+np.random.seed(42)
+torch.manual_seed(42)
+torch.cuda.manual_seed_all(42)
+
+parser = argparse.ArgumentParser(
+    description='Dragon Skin 10 Cantilever Beam Validation',
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter
+)
+parser.add_argument("--beam_length", type=float, default=0.10, 
+                    help="Beam length in meters")
+parser.add_argument("--beam_width", type=float, default=0.03, 
+                    help="Beam width in meters")
+parser.add_argument("--beam_height", type=float, default=0.03, 
+                    help="Beam height in meters")
+parser.add_argument("--resolution", type=int, default=30, 
+                    help="Simulation mesh resolution (elements along longest dimension). "
+                         "Recommended: 20=fast, 30=balanced, 40=accurate")
+parser.add_argument("--solver_iterations", type=int, default=130,
+                    help="Position solver iterations per timestep. "
+                         "Recommended: 30=fast, 40=balanced, 50=accurate")
+parser.add_argument("--max_time", type=float, default=3, 
+                    help="Simulation time in seconds")
+parser.add_argument("--marker_size", type=float, default=0.005, 
+                    help="Size of visual markers in meters")
 args, unknown = parser.parse_known_args()
 
 
@@ -44,6 +76,8 @@ class DragonSkinCantileverValidation:
     - Density: ρ = 1070 kg/m³
     - Time step: h = 0.01s
     - Recording window: 0 to 1.5s
+    
+    ENHANCED: Visual sphere markers show tracked node positions
     """
     
     def __init__(self):
@@ -52,7 +86,7 @@ class DragonSkinCantileverValidation:
         self.max_simulation_time = args.max_time
         
         print(f"\n{'='*80}")
-        print(f"Dragon Skin 10 Cantilever Beam - Validation Test")
+        print(f"Dragon Skin 10 Cantilever Beam - Validation Test (WITH MARKERS)")
         print(f"Based on: 'Sim-to-Real for Soft Robots using Differentiable FEM'")
         print(f"{'='*80}")
         print(f"\nPaper Parameters:")
@@ -61,6 +95,7 @@ class DragonSkinCantileverValidation:
         print(f"  Density:           ρ = 1,070 kg/m³")
         print(f"  Time Step:         h = 0.01s")
         print(f"  Recording Window:  0 to {self.max_simulation_time}s")
+        print(f"  Marker Size:       {args.marker_size*1000:.1f} mm")
         print(f"{'='*80}\n")
         
         self.my_world = World(
@@ -97,6 +132,7 @@ class DragonSkinCantileverValidation:
         
         self.initial_positions = None
         self.tracked_point_indices = {}
+        self.marker_prims = {}  # Store marker sphere references
         
         # Setup environment
         self.my_world.scene.add_default_ground_plane()
@@ -142,6 +178,56 @@ class DragonSkinCantileverValidation:
         dome_light.CreateIntensityAttr().Set(1000.0)
         dome_light.CreateColorAttr().Set(Gf.Vec3f(1.0, 1.0, 1.0))
 
+    def create_marker_sphere(self, label, position, color):
+        """Create a visual sphere marker at a tracked node position
+        
+        Args:
+            label: Name/label for the marker (e.g., 'fixed_end')
+            position: Gf.Vec3f position in world coordinates
+            color: Gf.Vec3f RGB color (0-1 range)
+        """
+        marker_path = f"/World/Markers/{label}"
+        
+        # Create sphere
+        sphere = UsdGeom.Sphere.Define(self.stage, marker_path)
+        sphere.CreateRadiusAttr().Set(args.marker_size)
+        sphere.CreateDisplayColorAttr().Set([color])
+        
+        # Set position
+        xform = UsdGeom.Xformable(sphere)
+        xform.ClearXformOpOrder()
+        translate_op = xform.AddTranslateOp()
+        translate_op.Set(position)
+        
+        # Create material for the marker
+        material_path = f"/World/Markers/{label}_material"
+        material = UsdShade.Material.Define(self.stage, material_path)
+        shader = UsdShade.Shader.Define(self.stage, f"{material_path}/Shader")
+        shader.CreateIdAttr("UsdPreviewSurface")
+        shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(color)
+        shader.CreateInput("emissiveColor", Sdf.ValueTypeNames.Color3f).Set(color * 0.3)
+        shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.4)
+        material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+        
+        binding_api = UsdShade.MaterialBindingAPI.Apply(sphere.GetPrim())
+        binding_api.Bind(material)
+        
+        return sphere
+
+    def update_marker_position(self, label, position):
+        """Update the position of a marker sphere
+        
+        Args:
+            label: Name/label of the marker
+            position: Gf.Vec3f new position in world coordinates
+        """
+        marker_path = f"/World/Markers/{label}"
+        sphere = UsdGeom.Sphere.Get(self.stage, marker_path)
+        if sphere:
+            xform = UsdGeom.Xformable(sphere)
+            translate_op = xform.GetOrderedXformOps()[0]
+            translate_op.Set(position)
+
     def makeEnvs(self):
         print("Creating validation environment...")
         
@@ -182,7 +268,7 @@ class DragonSkinCantileverValidation:
             prim_path=deformable_material_path,
             dynamic_friction=0.5,
             youngs_modulus=263824.0,    # E (will be calibrated in paper)
-            poissons_ratio=0.4999,      # ν = 0.4999 (nearly incompressible)
+            poissons_ratio=0.499,      # ν = 0.4999 (nearly incompressible)
             damping_scale=0.0,          # No artificial damping
             elasticity_damping=0.0,
             # density=1070.0              # ρ = 1,070 kg/m³
@@ -191,17 +277,18 @@ class DragonSkinCantileverValidation:
         print(f"\nDeformable Configuration:")
         print(f"  Beam: {self.beam_length*100:.1f}cm × {self.beam_width*100:.1f}cm × {self.beam_height*100:.1f}cm")
         print(f"  Resolution: {self.resolution} elements (longest dimension)")
+        print(f"  Solver iterations: {args.solver_iterations}")
         
         self.deformable = SingleDeformablePrim(
             name="dragonSkinBeam",
             prim_path=str(mesh_path),
             deformable_material=self.deformable_material,
-            vertex_velocity_damping=0.0,
+            vertex_velocity_damping=0.00,
             sleep_damping=0.0,
-            sleep_threshold=0.0,
+            sleep_threshold=0.00,
             settling_threshold=0.0,
             self_collision=False,
-            solver_position_iteration_count=30,
+            solver_position_iteration_count=args.solver_iterations,
             kinematic_enabled=False,
             simulation_hexahedral_resolution=self.resolution,
             collision_simplification=False,
@@ -255,12 +342,12 @@ class DragonSkinCantileverValidation:
         self._setup_tracking_points()
 
     def _setup_tracking_points(self):
-        """Setup tracking points along beam"""
+        """Setup tracking points along beam and create visual markers"""
         if self.initial_positions is None or len(self.initial_positions) == 0:
             print("Warning: No positions available")
             return
         
-        print(f"Setting up tracking points...")
+        print(f"Setting up tracking points with visual markers...")
         env_positions = self.initial_positions[0]
         
         # Sort by x-coordinate
@@ -276,14 +363,28 @@ class DragonSkinCantileverValidation:
             'free_end': num_points - 1
         }
         
+        # Color scheme for markers (distinctive colors)
+        colors = {
+            'fixed_end': Gf.Vec3f(0.0, 1.0, 0.0),      # Green
+            'quarter': Gf.Vec3f(0.0, 0.5, 1.0),        # Blue
+            'midpoint': Gf.Vec3f(1.0, 1.0, 0.0),       # Yellow
+            'three_quarter': Gf.Vec3f(1.0, 0.5, 0.0),  # Orange
+            'free_end': Gf.Vec3f(1.0, 0.0, 0.0)        # Red
+        }
+        
         print(f"Tracking {len(positions)} points:")
         for label, pos_idx in positions.items():
             idx, x_val = x_coords[pos_idx]
             self.tracked_point_indices[label] = idx
             node_pos = env_positions[idx]
-            print(f"  {label:15s}: node {idx:4d}, pos ({node_pos[0]:7.4f}, {node_pos[1]:7.4f}, {node_pos[2]:7.4f})")
+            
+            # Create visual marker at this position
+            marker_pos = Gf.Vec3f(node_pos[0].item(), node_pos[1].item(), node_pos[2].item())
+            self.marker_prims[label] = self.create_marker_sphere(label, marker_pos, colors[label])
+            
+            print(f"  {label:15s}: node {idx:4d}, pos ({node_pos[0]:7.4f}, {node_pos[1]:7.4f}, {node_pos[2]:7.4f}) [{colors[label]}]")
         
-        print()
+        print(f"\n✓ Visual markers created (size: {args.marker_size*1000:.1f} mm)\n")
 
     def setup_camera(self):
         """Position camera"""
@@ -293,7 +394,7 @@ class DragonSkinCantileverValidation:
         set_camera_view(eye=eye, target=target, camera_prim_path="/OmniverseKit_Persp")
 
     def record_data(self, current_time):
-        """Record deflection data at current timestep"""
+        """Record deflection data at current timestep and update marker positions"""
         current_positions = self.deformableView.get_simulation_mesh_nodal_positions()
         
         if current_positions is None or len(current_positions) == 0:
@@ -310,14 +411,90 @@ class DragonSkinCantileverValidation:
             deflection = initial_z - current_z  # Positive = downward
             
             self.deflection_history[label].append(deflection * 1000)  # Convert to mm
-            self.position_history[label].append([
+            
+            # Store current position
+            current_pos = [
                 env_positions[idx, 0].item(),
                 env_positions[idx, 1].item(),
                 current_z
-            ])
+            ]
+            self.position_history[label].append(current_pos)
+            
+            # Update marker position to follow the node
+            marker_pos = Gf.Vec3f(current_pos[0], current_pos[1], current_pos[2])
+            self.update_marker_position(label, marker_pos)
+
+    def save_data_csv(self, output_dir):
+        """Save deflection data to CSV for further analysis (using standard library only)"""
+        import csv
+        import os
+        
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Save main data CSV
+        csv_filename = os.path.join(output_dir, 'cantilever_validation_data.csv')
+        
+        with open(csv_filename, 'w', newline='') as csvfile:
+            # Create header
+            fieldnames = ['time_s']
+            for label in ['fixed_end', 'quarter', 'midpoint', 'three_quarter', 'free_end']:
+                fieldnames.extend([
+                    f'{label}_deflection_mm',
+                    f'{label}_x_m',
+                    f'{label}_y_m',
+                    f'{label}_z_m'
+                ])
+            
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            # Write data rows
+            for i, time in enumerate(self.time_history):
+                row = {'time_s': time}
+                
+                for label in ['fixed_end', 'quarter', 'midpoint', 'three_quarter', 'free_end']:
+                    row[f'{label}_deflection_mm'] = self.deflection_history[label][i]
+                    row[f'{label}_x_m'] = self.position_history[label][i][0]
+                    row[f'{label}_y_m'] = self.position_history[label][i][1]
+                    row[f'{label}_z_m'] = self.position_history[label][i][2]
+                
+                writer.writerow(row)
+        
+        print(f"✓ Data saved: {csv_filename}")
+        
+        # Save summary CSV
+        summary_filename = os.path.join(output_dir, 'cantilever_validation_summary.csv')
+        
+        final_tip_deflection = self.deflection_history['free_end'][-1] if len(self.deflection_history['free_end']) > 0 else 0
+        theoretical_mm = self.theoretical_tip_deflection * 1000
+        error_percent = abs(final_tip_deflection - theoretical_mm) / theoretical_mm * 100 if theoretical_mm > 0 else 0
+        
+        with open(summary_filename, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['Parameter', 'Value'])
+            writer.writerow(['Beam Length (m)', self.beam_length])
+            writer.writerow(['Beam Width (m)', self.beam_width])
+            writer.writerow(['Beam Height (m)', self.beam_height])
+            writer.writerow(['Resolution (elements)', self.resolution])
+            writer.writerow(['Time Step (s)', self.time_step])
+            writer.writerow(['Simulation Time (s)', self.max_simulation_time])
+            writer.writerow(['Young\'s Modulus (Pa)', 263824.0])
+            writer.writerow(['Poisson\'s Ratio', 0.4999])
+            writer.writerow(['Density (kg/m³)', 1070.0])
+            writer.writerow(['Theoretical Tip Deflection (mm)', f'{theoretical_mm:.6f}'])
+            writer.writerow(['Simulated Tip Deflection (mm)', f'{final_tip_deflection:.6f}'])
+            writer.writerow(['Error (%)', f'{error_percent:.2f}'])
+            writer.writerow(['Status', 'PASS' if error_percent < 15 else 'FAIL'])
+        
+        print(f"✓ Summary saved: {summary_filename}")
 
     def plot_results(self):
         """Generate plots comparing simulation to theory"""
+        if not MATPLOTLIB_AVAILABLE:
+            print("\nSkipping plot generation (matplotlib not available)")
+            print("Data has been saved to CSV files for external plotting")
+            return None
+        
         print("\nGenerating plots...")
         
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
@@ -424,8 +601,12 @@ Status: {"✓ PASS" if error_percent < 15 else "✗ FAIL"}
         
         plt.tight_layout()
         
-        # Save plot
-        filename = f'/home/claude/cantilever_validation_results.png'
+        # Save plot to custom experiments directory
+        import os
+        output_dir = '/home/rjrosales/Simulation/Custom_IsaacSim/experiments/'
+        os.makedirs(output_dir, exist_ok=True)
+        
+        filename = os.path.join(output_dir, 'cantilever_validation_results.png')
         plt.savefig(filename, dpi=150, bbox_inches='tight')
         print(f"✓ Plot saved: {filename}")
         
@@ -452,14 +633,18 @@ Status: {"✓ PASS" if error_percent < 15 else "✗ FAIL"}
                 
                 # Stop after max time
                 if current_time > self.max_simulation_time:
-                    print(f"\n✓ Reached {self.max_simulation_time}s - generating plots...")
-                    self.plot_results()
+                    print(f"\n✓ Reached {self.max_simulation_time}s - saving results...")
                     
-                    # Copy plot to outputs
-                    import shutil
-                    shutil.copy('/home/rjrosales/cantilever_validation_results.png', 
-                               '/mnt/user-data/outputs/cantilever_validation_results.png')
-                    print("✓ Plot saved to outputs")
+                    output_dir = '/home/rjrosales/Simulation/Custom_IsaacSim/experiments/'
+                    
+                    # Save CSV data (always works)
+                    self.save_data_csv(output_dir)
+                    
+                    # Try to generate plots if matplotlib available
+                    if MATPLOTLIB_AVAILABLE:
+                        self.plot_results()
+                    
+                    print(f"\n✓ All results saved to {output_dir}")
                     
                     print("\nSimulation complete. Close window to exit.")
                     # Keep window open for viewing

@@ -34,8 +34,14 @@ from isaacsim.core.api import World
 from isaacsim.core.api.materials.deformable_material import DeformableMaterial
 from isaacsim.core.prims import DeformablePrim, SingleDeformablePrim
 from omni.physx.scripts import physicsUtils
+
 from pxr import Gf, UsdGeom, PhysxSchema, UsdPhysics, Sdf, UsdShade, UsdLux
 import isaacsim.core.utils.deformable_mesh_utils as deformableMeshUtils
+
+# Set random seeds for reproducibility
+np.random.seed(42)
+torch.manual_seed(42)
+torch.cuda.manual_seed_all(42)
 
 parser = argparse.ArgumentParser(
     description='Dragon Skin 10 Cantilever Beam Validation',
@@ -47,13 +53,13 @@ parser.add_argument("--beam_width", type=float, default=0.03,
                     help="Beam width in meters")
 parser.add_argument("--beam_height", type=float, default=0.03, 
                     help="Beam height in meters")
-parser.add_argument("--resolution", type=int, default=30, 
+parser.add_argument("--resolution", type=int, default=10, 
                     help="Simulation mesh resolution (elements along longest dimension). "
                          "Recommended: 20=fast, 30=balanced, 40=accurate")
-parser.add_argument("--solver_iterations", type=int, default=130,
+parser.add_argument("--solver_iterations", type=int, default=300,
                     help="Position solver iterations per timestep. "
                          "Recommended: 30=fast, 40=balanced, 50=accurate")
-parser.add_argument("--max_time", type=float, default=5.0, 
+parser.add_argument("--max_time", type=float, default=1.5, 
                     help="Simulation time in seconds")
 args, unknown = parser.parse_known_args()
 
@@ -90,7 +96,7 @@ class DragonSkinCantileverValidation:
             backend="torch", 
             device="cuda",
             physics_dt=self.time_step,      # Match paper exactly
-            rendering_dt=self.time_step * 2 # Render every 2 physics steps
+            rendering_dt=self.time_step *2 # Render every 2 physics steps
         )
         self.stage = simulation_app.context.get_stage()
         
@@ -184,7 +190,7 @@ class DragonSkinCantileverValidation:
         physicsUtils.setup_transform_as_scale_orient_translate(skin_mesh)
         beam_size = Gf.Vec3f(self.beam_length, self.beam_width, self.beam_height)
         physicsUtils.set_or_add_scale_op(skin_mesh, beam_size)
-        beam_center = Gf.Vec3f(0.0, 0.0, 1.0)
+        beam_center = Gf.Vec3f(0.0, 0.0, 2.0)
         physicsUtils.set_or_add_translate_op(skin_mesh, beam_center)
         
         # Visual material (salmon pink for silicone)
@@ -204,8 +210,8 @@ class DragonSkinCantileverValidation:
             prim_path=deformable_material_path,
             dynamic_friction=0.5,
             youngs_modulus=263824.0,    # E (will be calibrated in paper)
-            poissons_ratio=0.4999,      # ν = 0.4999 (nearly incompressible)
-            damping_scale=0.0,          # No artificial damping
+            poissons_ratio=0.499,      # ν = 0.4999 (nearly incompressible)
+            damping_scale=0.00,          # No artificial damping
             elasticity_damping=0.0,
             # density=1070.0              # ρ = 1,070 kg/m³
         )
@@ -219,9 +225,9 @@ class DragonSkinCantileverValidation:
             name="dragonSkinBeam",
             prim_path=str(mesh_path),
             deformable_material=self.deformable_material,
-            vertex_velocity_damping=0.0,
+            vertex_velocity_damping=9.00,
             sleep_damping=0.0,
-            sleep_threshold=0.01,
+            sleep_threshold=0.00,
             settling_threshold=0.01,
             self_collision=False,
             solver_position_iteration_count=args.solver_iterations,

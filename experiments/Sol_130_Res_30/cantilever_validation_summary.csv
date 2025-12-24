@@ -4,11 +4,11 @@ Beam Width (m),0.03
 Beam Height (m),0.03
 Resolution (elements),30
 Time Step (s),0.01
-Simulation Time (s),5.0
+Simulation Time (s),10
 Young's Modulus (Pa),263824.0
 Poisson's Ratio,0.4999
 Density (kg/m³),1070.0
 Theoretical Tip Deflection (mm),6.631125
-Simulated Tip Deflection (mm),6.335855
-Error (%),4.45
+Simulated Tip Deflection (mm),7.046342
+Error (%),6.26
 Status,PASS

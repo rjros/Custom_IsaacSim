@@ -1,0 +1,17 @@
+Parameter,Value
+Beam Length (m),0.1
+Beam Width (m),0.03
+Beam Height (m),0.03
+External Force (N),0.0
+Start Frozen,False
+Release Time (s),0.0
+Young's Modulus (Pa),234900.0
+Poisson's Ratio,0.439
+Density (kg/m³),1210.0
+Mass Damping (s^-1),9.11
+Max Tip Displacement (mm),2004.9850940704346
+Final Tip Displacement (mm),2002.232313156128
+Final Left Displacement (mm),9.359359741210938
+Final Right Displacement (mm),9.473800659179688
+Oscillation Frequency (Hz),3.649635118072052
+Period (s),0.27399999387562274
